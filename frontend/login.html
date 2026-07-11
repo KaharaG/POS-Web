@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>POS Login</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="login-body">
+
+<div class="login-box">
+  <div class="brand">POS<span>.</span></div>
+  <form id="loginForm" class="form-grid">
+    <label>Username <input name="username" required autofocus autocomplete="username"></label>
+    <label>Password <input name="password" type="password" required autocomplete="current-password"></label>
+    <button type="submit" class="primary-btn">Log In</button>
+  </form>
+  <div id="loginMsg" class="msg"></div>
+</div>
+
+<script>
+document.getElementById("loginForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = new FormData(e.target);
+  const msg = document.getElementById("loginMsg");
+  const btn = e.target.querySelector("button");
+  btn.disabled = true;
+
+  try {
+    const res = await fetch("/api/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: f.get("username"),
+        password: f.get("password"),
+      }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      window.location.href = "/";
+    } else {
+      msg.textContent = data.error || "Login failed";
+      msg.className = "msg error";
+      btn.disabled = false;
+    }
+  } catch (err) {
+    msg.textContent = "Could not reach the server. Try again.";
+    msg.className = "msg error";
+    btn.disabled = false;
+  }
+});
+</script>
+</body>
+</html>
