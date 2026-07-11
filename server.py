@@ -36,7 +36,7 @@ if _admin_hash_env:
     ADMIN_PASSWORD_HASH = _admin_hash_env
 else:
     ADMIN_PASSWORD_HASH = generate_password_hash(
-        os.environ.get("POS_ADMIN_PASSWORD", "changeme123")
+        os.environ.get("POS_ADMIN_PASSWORD", "RedDuckT")
     )
 
 api = Api()
