@@ -27,6 +27,12 @@ app = Flask(__name__, static_folder=None)
 # SECRET_KEY must be set as a real env var in production (Render dashboard).
 app.secret_key = os.environ.get("SECRET_KEY", "dev-only-insecure-key-change-me")
 
+from datetime import timedelta
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=8)
+
+app.config["SESSION_COOKIE_SECURE"] = True
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
 # ---------------- Credentials ----------------
 
