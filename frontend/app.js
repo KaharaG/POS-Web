@@ -12,6 +12,26 @@ function tickClock() {
 setInterval(tickClock, 1000);
 tickClock();
 
+// ---------------- Role-based UI ----------------
+async function applyRoleRestrictions() {
+  try {
+    const res = await fetch("/api/me");
+    if (!res.ok) return;
+    const me = await res.json();
+    if (me.role !== "owner") {
+      ["inventory", "history", "lowstock"].forEach(tab => {
+        const btn = document.querySelector(`.tab-btn[data-tab="${tab}"]`);
+        if (btn) btn.style.display = "none";
+      });
+    }
+  } catch (err) {
+    // If this fails, tabs just stay visible client-side — the server
+    // still enforces access on every /api/<method> call regardless.
+    console.error("Could not load role info:", err);
+  }
+}
+applyRoleRestrictions();
+
 // ---------------- Tabs ----------------
 document.querySelectorAll(".tab-btn").forEach(btn => {
   btn.addEventListener("click", () => {

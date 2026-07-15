@@ -7,7 +7,8 @@ frontend/ files, and exposes every Api method as POST /api/<method>,
 so app.js keeps working unmodified via the pywebview-shim.js shim.
 
 Adds session-based login since this now runs on the open internet
-instead of a single trusted machine.
+instead of a single trusted machine, plus owner/cashier role-based
+access control.
 """
 
 import os
@@ -26,27 +27,55 @@ app = Flask(__name__, static_folder=None)
 # SECRET_KEY must be set as a real env var in production (Render dashboard).
 app.secret_key = os.environ.get("SECRET_KEY", "dev-only-insecure-key-change-me")
 
-ADMIN_USERNAME = os.environ.get("POS_ADMIN_USER", "admin")
 
-# Prefer a pre-hashed password (POS_ADMIN_PASSWORD_HASH) in production.
-# Falls back to hashing POS_ADMIN_PASSWORD at startup, or a default for
-# local testing only.
-_admin_hash_env = os.environ.get("POS_ADMIN_PASSWORD_HASH")
-if _admin_hash_env:
-    ADMIN_PASSWORD_HASH = _admin_hash_env
-else:
-    ADMIN_PASSWORD_HASH = generate_password_hash(
-        os.environ.get("POS_ADMIN_PASSWORD", "WillWallow")
+# ---------------- Credentials ----------------
+
+def _passHash(hash_env, plain_env, default, label):
+    """
+    Resolves a password hash from environment variables, with a safe
+    fallback for local development only. Fails loudly if credentials
+    are missing when running on Render.
+    """
+    hash_val = os.environ.get(hash_env)
+    if hash_val:
+        return hash_val
+
+    plain_val = os.environ.get(plain_env)
+    if plain_val:
+        return generate_password_hash(plain_val)
+
+    if os.environ.get("RENDER") is None:
+        # Not on Render — safe to use a placeholder for local testing
+        return generate_password_hash(default)
+
+    raise RuntimeError(
+        f"{hash_env} or {plain_env} must be set in production ({label})"
     )
+
+
+ADMIN_USERNAME = os.environ.get("POS_ADMIN_USER", "admin")
+ADMIN_PASSWORD_HASH = _passHash(
+    "POS_ADMIN_PASSWORD_HASH", "POS_ADMIN_PASSWORD", "changeme123", "admin"
+)
+
+CASHIER_USERNAME = os.environ.get("POS_CASHIER_USER", "cashier")
+CASHIER_PASSWORD_HASH = _passHash(
+    "POS_CASHIER_PASSWORD_HASH", "POS_CASHIER_PASSWORD", "changeme456", "cashier"
+)
+
 
 api = Api()
 
-# Methods on Api that are safe to expose at /api/<name>
-_EXPOSED_METHODS = {
-    "scan", "search_products", "get_available_imeis", "checkout",
-    "add_product", "add_imei_units", "restock_qty", "get_all_products",
-    "get_low_stock", "get_sales_history",
+# Methods any logged-in user (owner or cashier) can call
+_SHARED_METHODS = {"scan", "search_products", "get_available_imeis", "checkout"}
+
+# Methods restricted to owners only
+_OWNER_METHODS = {
+    "add_product", "add_imei_units", "restock_qty",
+    "get_all_products", "get_low_stock", "get_sales_history",
 }
+
+_EXPOSED_METHODS = _SHARED_METHODS | _OWNER_METHODS
 
 
 def login_required(f):
@@ -54,6 +83,17 @@ def login_required(f):
     def wrapper(*args, **kwargs):
         if not session.get("logged_in"):
             return jsonify({"error": "unauthorized"}), 401
+        return f(*args, **kwargs)
+    return wrapper
+
+
+def owner_required(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if not session.get("logged_in"):
+            return jsonify({"error": "unauthorized"}), 401
+        if session.get("role") != "owner":
+            return jsonify({"error": "forbidden"}), 403
         return f(*args, **kwargs)
     return wrapper
 
@@ -70,12 +110,23 @@ def login():
     data = request.get_json(force=True, silent=True) or {}
     username = data.get("username", "")
     password = data.get("password", "")
+
     if username == ADMIN_USERNAME and check_password_hash(ADMIN_PASSWORD_HASH, password):
         session.clear()
         session["logged_in"] = True
         session["username"] = username
+        session["role"] = "owner"
         session.permanent = True
-        return jsonify({"ok": True})
+        return jsonify({"ok": True, "role": "owner"})
+
+    if username == CASHIER_USERNAME and check_password_hash(CASHIER_PASSWORD_HASH, password):
+        session.clear()
+        session["logged_in"] = True
+        session["username"] = username
+        session["role"] = "cashier"
+        session.permanent = True
+        return jsonify({"ok": True, "role": "cashier"})
+
     return jsonify({"ok": False, "error": "Invalid username or password"}), 401
 
 
@@ -83,6 +134,12 @@ def login():
 def logout():
     session.clear()
     return jsonify({"ok": True})
+
+
+@app.route("/api/me")
+@login_required
+def me():
+    return jsonify({"username": session.get("username"), "role": session.get("role")})
 
 
 # ---------------- Pages / static assets ----------------
@@ -116,6 +173,9 @@ def shim_js():
 def api_dispatch(method_name):
     if method_name not in _EXPOSED_METHODS:
         return jsonify({"error": "unknown method"}), 404
+
+    if method_name in _OWNER_METHODS and session.get("role") != "owner":
+        return jsonify({"error": "forbidden"}), 403
 
     method = getattr(api, method_name)
     payload = request.get_json(force=True, silent=True) or {}
